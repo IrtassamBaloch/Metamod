@@ -1,0 +1,25 @@
+{
+  "name": "metamod-e2e",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "npx playwright test",
+    "test:headed": "npx playwright test --headed",
+    "test:login": "npx playwright test tests/login.spec.js",
+    "test:metamod": "npx playwright test tests/metamod.spec.js",
+    "test:refinement": "npx playwright test tests/agent-refinement-loop.spec.js",
+    "test:report": "npx playwright show-report"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
+  },
+  "dependencies": {
+    "@playwright/mcp": "^0.0.68",
+    "dotenv": "^17.3.1"
+  }
+}
