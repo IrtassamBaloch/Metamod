@@ -4,24 +4,29 @@ const { test, expect } = require('../fixtures/refinement');
 const { parsePositiveInteger, truncate } = require('../utils/refinement');
 
 const DEFAULT_MAX_CYCLES = 5;
+const DEFAULT_MAX_PLAYGROUND_TURNS = 8;
 
 test.describe.serial('Agent Refinement Loop', () => {
     let maxCycles;
+    let maxPlaygroundTurns;
     let report;
     let systemPrompt = '';
     let nodeLabels = [];
     let analysis;
-    let responseText = '';
-    let validatorOutput;
+    let latestCycleResult;
     let initialCycleRecord;
 
     test.beforeAll(async () => {
         maxCycles = parsePositiveInteger(process.env.MAX_CYCLES, DEFAULT_MAX_CYCLES);
+        maxPlaygroundTurns = parsePositiveInteger(
+            process.env.MAX_PLAYGROUND_TURNS,
+            DEFAULT_MAX_PLAYGROUND_TURNS
+        );
         report = {
             totalCycles: 0,
             finalStatus: 'not_started',
-            finalScore: 0,
             finalReason: '',
+            finalOutputCompleted: false,
             cycleHistory: [],
         };
     });
@@ -79,11 +84,11 @@ test.describe.serial('Agent Refinement Loop', () => {
         }
     });
 
-    test('TC-06: Generate the AI test prompt and send it through the playground', async ({
+    test('TC-06: Generate the initial AI prompt and complete the first playground session', async ({
         agentRefinementPage,
         openAIRefinementClient,
     }) => {
-        test.setTimeout(240000);
+        test.setTimeout(300000);
         analysis = await openAIRefinementClient.analyzeAgent(systemPrompt, nodeLabels);
         if (!analysis.testPrompt) {
             throw new Error('The analyzer did not produce a usable playground prompt.');
@@ -91,76 +96,94 @@ test.describe.serial('Agent Refinement Loop', () => {
 
         initialCycleRecord = {
             cycle: 1,
-            generatedTestPrompt: analysis.testPrompt,
-            responseExcerpt: '',
-            validatorOutput: null,
+            generatedPrompt: analysis.testPrompt,
+            transcriptExcerpt: '',
+            timelineSnapshot: '',
+            outputCompleted: false,
             appliedRefinement: '',
+            status: 'in_progress',
+            failureReason: '',
             systemPromptSaved: false,
+            turnsUsed: 0,
         };
 
-        responseText = await agentRefinementPage.sendPromptToPlayground(analysis.testPrompt);
-        initialCycleRecord.responseExcerpt = truncate(responseText);
+        latestCycleResult = await agentRefinementPage.runAiGuidedPlaygroundSession({
+            initialPrompt: analysis.testPrompt,
+            maxTurns: maxPlaygroundTurns,
+            openAIRefinementClient,
+            systemPrompt,
+            agentContext: analysis.agentContext,
+            visibleNodeLabels: nodeLabels,
+        });
+
+        initialCycleRecord.transcriptExcerpt = truncate(latestCycleResult.transcriptText, 600);
+        initialCycleRecord.timelineSnapshot = truncate(latestCycleResult.timelineSummary, 600);
+        initialCycleRecord.outputCompleted = latestCycleResult.outputCompleted;
+        initialCycleRecord.status = latestCycleResult.outputCompleted ? 'passed' : 'needs_refinement';
+        initialCycleRecord.failureReason = latestCycleResult.failureReason;
+        initialCycleRecord.turnsUsed = latestCycleResult.turnCount;
     });
 
-    test('TC-07: Validate the response and record the initial cycle result', async ({
-        openAIRefinementClient,
-    }) => {
-        validatorOutput = await openAIRefinementClient.validateAgentResponse(
-            analysis,
-            systemPrompt,
-            responseText
-        );
-
-        initialCycleRecord.validatorOutput = validatorOutput;
+    test('TC-07: Record the first playground-cycle result', async () => {
         report.cycleHistory.push(initialCycleRecord);
         report.totalCycles = report.cycleHistory.length;
-        report.finalScore = validatorOutput.score;
-        report.finalReason = validatorOutput.reason;
+        report.finalOutputCompleted = initialCycleRecord.outputCompleted;
+        report.finalReason =
+            initialCycleRecord.failureReason ||
+            (initialCycleRecord.outputCompleted
+                ? 'The To-Do Timeline Output step completed successfully.'
+                : 'The first playground session did not complete the Output step.');
 
-        if (validatorOutput.valid && validatorOutput.score >= 0.75) {
+        if (initialCycleRecord.outputCompleted) {
             report.finalStatus = 'passed';
         }
     });
 
-    test('TC-08: Execute the refinement loop if the initial validation failed', async ({
+    test('TC-08: Execute refinement cycles until the Output step completes', async ({
         agentRefinementPage,
         openAIRefinementClient,
     }) => {
-        test.setTimeout(300000);
+        test.setTimeout(600000);
 
         if (report.finalStatus === 'passed') {
             return;
         }
 
         for (let cycle = 2; cycle <= maxCycles; cycle += 1) {
+            const refinementReason =
+                latestCycleResult?.failureReason ||
+                'The Output step did not complete. Improve the workflow to finish the timeline successfully.';
+            const refinementPayload = {
+                reason: refinementReason,
+                suggestedRefinement: refinementReason,
+            };
             const improvedPrompt = await openAIRefinementClient.improveSystemPrompt(
                 systemPrompt,
                 analysis,
-                validatorOutput,
-                responseText
+                refinementPayload,
+                latestCycleResult?.transcriptText || latestCycleResult?.timelineSummary || refinementReason
             );
 
             if (!improvedPrompt) {
                 throw new Error('The prompt improver did not return a replacement system prompt.');
             }
 
-            const refinementText =
-                validatorOutput.suggestedRefinement ||
-                validatorOutput.reason ||
-                'Improve the flow based on the failed validation.';
-
             const cycleRecord = {
                 cycle,
-                generatedTestPrompt: '',
-                responseExcerpt: '',
-                validatorOutput: null,
-                appliedRefinement: refinementText,
+                generatedPrompt: '',
+                transcriptExcerpt: '',
+                timelineSnapshot: '',
+                outputCompleted: false,
+                appliedRefinement: refinementReason,
+                status: 'in_progress',
+                failureReason: '',
                 systemPromptSaved: false,
+                turnsUsed: 0,
             };
 
             await agentRefinementPage.writeSystemPrompt(improvedPrompt);
             cycleRecord.systemPromptSaved = true;
-            await agentRefinementPage.applyRefinement(refinementText);
+            await agentRefinementPage.applyRefinement(refinementReason);
             await agentRefinementPage.connectAllVisibleNodes();
             await agentRefinementPage.runEachNode();
             await agentRefinementPage.runGlobalHeader();
@@ -180,23 +203,33 @@ test.describe.serial('Agent Refinement Loop', () => {
                 throw new Error('The analyzer did not produce a usable prompt after refinement.');
             }
 
-            cycleRecord.generatedTestPrompt = analysis.testPrompt;
-            responseText = await agentRefinementPage.sendPromptToPlayground(analysis.testPrompt);
-            cycleRecord.responseExcerpt = truncate(responseText);
-
-            validatorOutput = await openAIRefinementClient.validateAgentResponse(
-                analysis,
+            cycleRecord.generatedPrompt = analysis.testPrompt;
+            latestCycleResult = await agentRefinementPage.runAiGuidedPlaygroundSession({
+                initialPrompt: analysis.testPrompt,
+                maxTurns: maxPlaygroundTurns,
+                openAIRefinementClient,
                 systemPrompt,
-                responseText
-            );
+                agentContext: analysis.agentContext,
+                visibleNodeLabels: nodeLabels,
+            });
 
-            cycleRecord.validatorOutput = validatorOutput;
+            cycleRecord.transcriptExcerpt = truncate(latestCycleResult.transcriptText, 600);
+            cycleRecord.timelineSnapshot = truncate(latestCycleResult.timelineSummary, 600);
+            cycleRecord.outputCompleted = latestCycleResult.outputCompleted;
+            cycleRecord.status = latestCycleResult.outputCompleted ? 'passed' : 'needs_refinement';
+            cycleRecord.failureReason = latestCycleResult.failureReason;
+            cycleRecord.turnsUsed = latestCycleResult.turnCount;
+
             report.cycleHistory.push(cycleRecord);
             report.totalCycles = report.cycleHistory.length;
-            report.finalScore = validatorOutput.score;
-            report.finalReason = validatorOutput.reason;
+            report.finalOutputCompleted = cycleRecord.outputCompleted;
+            report.finalReason =
+                cycleRecord.failureReason ||
+                (cycleRecord.outputCompleted
+                    ? 'The To-Do Timeline Output step completed successfully.'
+                    : 'The refinement cycle ended before the Output step completed.');
 
-            if (validatorOutput.valid && validatorOutput.score >= 0.75) {
+            if (cycleRecord.outputCompleted) {
                 report.finalStatus = 'passed';
                 return;
             }
@@ -205,16 +238,16 @@ test.describe.serial('Agent Refinement Loop', () => {
         report.finalStatus = 'failed';
     });
 
-    test('TC-09: Print the final JSON report and assert the refinement outcome', async () => {
+    test('TC-09: Print the final JSON report and assert the Output step outcome', async () => {
         report.totalCycles = report.cycleHistory.length;
 
-        if (report.finalStatus !== 'passed') {
+        if (report.finalStatus !== 'passed' || !report.finalOutputCompleted) {
             throw new Error(
-                `Refinement loop did not reach acceptance after ${report.totalCycles} cycles: ${report.finalReason}`
+                `Refinement loop did not complete the To-Do Timeline Output step after ${report.totalCycles} cycles: ${report.finalReason}`
             );
         }
 
         expect(report.finalStatus).toBe('passed');
-        expect(report.finalScore).toBeGreaterThanOrEqual(0.75);
+        expect(report.finalOutputCompleted).toBe(true);
     });
 });

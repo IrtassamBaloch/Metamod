@@ -1,3 +1,16 @@
+# Azure DevOps CI for Playwright automation
+#
+# Required secret variables:
+# - METAMOD_USERNAME
+# - METAMOD_PASSWORD
+#
+# Optional variables:
+# - TEST_ENV: dev | qa | staging | production
+# - BASE_URL: overrides TEST_ENV when set
+# - PLAYWRIGHT_TEST_COMMAND: defaults to "npx playwright test"
+# - OPENAI_API_KEY: required only for the refinement suite
+# - OPENAI_MODEL: optional OpenAI model override
+
 trigger:
   branches:
     include:
@@ -8,63 +21,78 @@ pr:
     include:
       - '*'
 
-pool:
-  vmImage: 'ubuntu-latest'
+name: 'playwright-$(Date:yyyyMMdd)-$(Rev:r)'
 
 variables:
   NODE_VERSION: '20.x'
+  VM_IMAGE: 'ubuntu-latest'
   TEST_ENV: 'staging'
   PLAYWRIGHT_TEST_COMMAND: 'npx playwright test'
-  PLAYWRIGHT_JUNIT_FILE: 'test-results/junit.xml'
+  JUNIT_RESULTS_FILE: 'test-results/junit.xml'
+  HTML_REPORT_FOLDER: 'playwright-report'
+  RAW_RESULTS_FOLDER: 'test-results'
 
-steps:
-  - task: UseNode@1
-    displayName: 'Use Node.js $(NODE_VERSION)'
-    inputs:
-      version: '$(NODE_VERSION)'
+stages:
+  - stage: Playwright_CI
+    displayName: 'Playwright CI'
+    jobs:
+      - job: Run_E2E_Tests
+        displayName: 'Install, run tests, and publish results'
+        pool:
+          vmImage: '$(VM_IMAGE)'
 
-  - script: npm ci
-    displayName: 'Install npm dependencies'
+        steps:
+          - checkout: self
+            displayName: 'Checkout repository'
 
-  - script: npx playwright install --with-deps chromium
-    displayName: 'Install Playwright browsers'
+          - task: UseNode@1
+            displayName: 'Use Node.js $(NODE_VERSION)'
+            inputs:
+              version: '$(NODE_VERSION)'
 
-  - script: $(PLAYWRIGHT_TEST_COMMAND)
-    displayName: 'Run Playwright tests'
-    env:
-      CI: 'true'
-      TEST_ENV: $(TEST_ENV)
-      BASE_URL: $(BASE_URL)
-      METAMOD_USERNAME: $(METAMOD_USERNAME)
-      METAMOD_PASSWORD: $(METAMOD_PASSWORD)
-      OPENAI_API_KEY: $(OPENAI_API_KEY)
-      OPENAI_MODEL: $(OPENAI_MODEL)
+          - bash: npm ci
+            displayName: 'Install project dependencies'
 
-  - script: mkdir -p playwright-report test-results
-    displayName: 'Ensure report directories exist'
-    condition: succeededOrFailed()
+          - bash: npx playwright install --with-deps chromium
+            displayName: 'Install Playwright browser dependencies'
 
-  - task: PublishTestResults@2
-    displayName: 'Publish JUnit test results'
-    condition: succeededOrFailed()
-    inputs:
-      testResultsFormat: 'JUnit'
-      testResultsFiles: '$(PLAYWRIGHT_JUNIT_FILE)'
-      searchFolder: '$(System.DefaultWorkingDirectory)'
-      mergeTestResults: true
-      failTaskOnFailedTests: true
-      testRunTitle: 'Playwright E2E Tests'
+          - bash: $(PLAYWRIGHT_TEST_COMMAND)
+            displayName: 'Execute Playwright test suite'
+            env:
+              CI: 'true'
+              TEST_ENV: $(TEST_ENV)
+              BASE_URL: $(BASE_URL)
+              METAMOD_USERNAME: $(METAMOD_USERNAME)
+              METAMOD_PASSWORD: $(METAMOD_PASSWORD)
+              OPENAI_API_KEY: $(OPENAI_API_KEY)
+              OPENAI_MODEL: $(OPENAI_MODEL)
 
-  - task: PublishPipelineArtifact@1
-    displayName: 'Publish Playwright HTML report'
-    condition: succeededOrFailed()
-    inputs:
-      targetPath: '$(System.DefaultWorkingDirectory)/playwright-report'
-      artifact: 'playwright-report'
+          # Publish steps run even when tests fail so failures still keep reports.
+          - bash: mkdir -p $(HTML_REPORT_FOLDER) $(RAW_RESULTS_FOLDER)
+            displayName: 'Ensure report folders exist'
+            condition: always()
 
-  - task: PublishPipelineArtifact@1
-    displayName: 'Publish raw test results'
-    condition: succeededOrFailed()
-    inputs:
-      targetPath: '$(System.DefaultWorkingDirectory)/test-results'
-      artifact: 'test-results'
+          - task: PublishTestResults@2
+            displayName: 'Publish test results'
+            condition: always()
+            inputs:
+              testResultsFormat: 'JUnit'
+              testResultsFiles: '$(JUNIT_RESULTS_FILE)'
+              searchFolder: '$(System.DefaultWorkingDirectory)'
+              mergeTestResults: true
+              failTaskOnFailedTests: true
+              testRunTitle: 'Playwright E2E Tests'
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish Playwright HTML report artifact'
+            condition: always()
+            inputs:
+              targetPath: '$(System.DefaultWorkingDirectory)/$(HTML_REPORT_FOLDER)'
+              artifact: 'playwright-report'
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish raw Playwright results artifact'
+            condition: always()
+            inputs:
+              targetPath: '$(System.DefaultWorkingDirectory)/$(RAW_RESULTS_FOLDER)'
+              artifact: 'test-results'

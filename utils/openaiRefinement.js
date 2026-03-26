@@ -35,7 +35,12 @@ class OpenAIRefinementClient {
             /rate limit/i.test(message) ||
             /invalid_api_key/i.test(message) ||
             /authentication/i.test(message) ||
-            /quota/i.test(message)
+            /quota/i.test(message) ||
+            /network/i.test(message) ||
+            /fetch failed/i.test(message) ||
+            /timed out/i.test(message) ||
+            /econnreset/i.test(message) ||
+            /enotfound/i.test(message)
         );
     }
 
@@ -153,6 +158,83 @@ class OpenAIRefinementClient {
         }
 
         return refinements.join('\n\n');
+    }
+
+    localGenerateNextPlaygroundMessage(context = {}) {
+        if (context.outputCompleted) {
+            return {
+                action: 'stop',
+                nextMessage: '',
+                reason: 'The Output step is already complete.',
+            };
+        }
+
+        const latestAssistantMessage = [...(context.transcript || [])]
+            .reverse()
+            .find((entry) => entry.role === 'assistant')?.text || '';
+        const normalizedAssistant = normalizeText(latestAssistantMessage).toLowerCase();
+        const timelineText = (context.timelineSteps || [])
+            .map((step) => `${step.label}:${step.status}`)
+            .join(' ')
+            .toLowerCase();
+
+        if (context.pendingApproval) {
+            return {
+                action: 'stop',
+                nextMessage: '',
+                reason: 'Human approval is pending and will be handled in the UI.',
+            };
+        }
+
+        if (/\(a\).+\(b\)/i.test(latestAssistantMessage) || /choose a or b/i.test(normalizedAssistant)) {
+            return {
+                action: 'continue',
+                nextMessage: 'B',
+                reason: 'Select the simulated/example response path when live data is unavailable.',
+            };
+        }
+
+        if (/confirm|location|city|country|which location|want current weather for/i.test(normalizedAssistant)) {
+            return {
+                action: 'continue',
+                nextMessage: 'Seattle, WA, US',
+                reason: 'Provide a concrete location so the weather flow can continue.',
+            };
+        }
+
+        if (
+            /\byes\/no\b|\bconfirm\b|\bshould i continue\b|\bapprove\b|\bproceed\b/.test(normalizedAssistant)
+        ) {
+            return {
+                action: 'continue',
+                nextMessage: 'yes',
+                reason: 'Answer the confirmation prompt so the flow can continue.',
+            };
+        }
+
+        if (/imperial|fahrenheit|mph|json|structured/.test(normalizedAssistant)) {
+            return {
+                action: 'continue',
+                nextMessage:
+                    'Convert the values to imperial units and include both a short summary and structured JSON.',
+                reason: 'Clarify the requested output format.',
+            };
+        }
+
+        if (/output:pending|output:unknown/.test(timelineText)) {
+            return {
+                action: 'continue',
+                nextMessage:
+                    'Return the best available answer now. Include a short summary and structured JSON with null values for any unavailable live weather fields.',
+                reason: 'Drive the flow to the Output step even if live data is unavailable.',
+            };
+        }
+
+        return {
+            action: 'continue',
+            nextMessage: 'Please continue and finish the workflow output.',
+            reason: 'Advance the flow toward a completed Output step.',
+        };
     }
 
     async jsonCompletion(systemPrompt, userPrompt, outputKey) {
@@ -329,6 +411,36 @@ class OpenAIRefinementClient {
 
             this.logFallback(error.message);
             return this.localImproveSystemPrompt(currentSystemPrompt, validatorOutput);
+        }
+    }
+
+    async generateNextPlaygroundMessage(context = {}) {
+        try {
+            const result = await this.jsonCompletion(
+                [
+                    'You guide a user through a workflow playground conversation.',
+                    'Return only valid JSON with keys: action, nextMessage, reason.',
+                    'action must be either "continue" or "stop".',
+                    'Use "stop" only when the Output step is complete or no further user message should be sent.',
+                    'nextMessage must be an empty string when action is "stop".',
+                    'Keep nextMessage short and directly usable as the next user message.',
+                ].join(' '),
+                JSON.stringify(context),
+                'action'
+            );
+
+            return {
+                action: normalizeText(result.action).toLowerCase() === 'stop' ? 'stop' : 'continue',
+                nextMessage: normalizeText(result.nextMessage),
+                reason: normalizeText(result.reason),
+            };
+        } catch (error) {
+            if (!this.shouldUseLocalFallback(error)) {
+                throw error;
+            }
+
+            this.logFallback(error.message);
+            return this.localGenerateNextPlaygroundMessage(context);
         }
     }
 }

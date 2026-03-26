@@ -168,6 +168,16 @@ See [`skills/SKILL.md`](./skills/SKILL.md) for the full guide on:
 
 This repository now includes [`azure-pipelines.yml`](./azure-pipelines.yml) for Playwright CI on `ubuntu-latest`.
 
+### Pipeline flow
+
+The pipeline is organized as a single clear stage:
+
+1. Checkout the repository
+2. Install Node.js and npm dependencies
+3. Install Playwright Chromium and Linux dependencies
+4. Run the configured Playwright command
+5. Publish JUnit results, HTML report, and raw test artifacts
+
 ### Required pipeline variables
 
 Configure these in Azure DevOps before running the pipeline:
@@ -183,14 +193,11 @@ Configure these in Azure DevOps before running the pipeline:
 - `OPENAI_API_KEY` (secret) when `PLAYWRIGHT_TEST_COMMAND` includes the refinement loop suite
 - `OPENAI_MODEL` if you want to override the default OpenAI model
 
-### What the pipeline does
+### Variable mapping inside the pipeline
 
-- Installs Node.js `20.x`
-- Runs `npm ci`
-- Installs Playwright Chromium with Linux dependencies
-- Executes `$(PLAYWRIGHT_TEST_COMMAND)` and defaults to `npx playwright test`
-- Publishes JUnit test results to Azure DevOps
-- Uploads `playwright-report` and `test-results` as pipeline artifacts
+- `TEST_ENV` and `BASE_URL` control the target environment
+- `PLAYWRIGHT_TEST_COMMAND` controls the exact Playwright command to run
+- `METAMOD_USERNAME`, `METAMOD_PASSWORD`, `OPENAI_API_KEY`, and `OPENAI_MODEL` are passed directly to the test process
 
 ### Example test command overrides
 

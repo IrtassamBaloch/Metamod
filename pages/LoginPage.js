@@ -29,7 +29,17 @@ class LoginPage {
 
     /** Navigate to the login page. */
     async navigate() {
-        await this.page.goto('/login', { waitUntil: 'domcontentloaded', timeout: 90000 });
+        try {
+            await this.page.goto('/login', { waitUntil: 'domcontentloaded', timeout: 90000 });
+        } catch (error) {
+            if (!/interrupted by another navigation/i.test(String(error?.message || error || ''))) {
+                throw error;
+            }
+
+            await this.page.waitForURL('**/login', { timeout: 15000 }).catch(() => {
+                throw error;
+            });
+        }
     }
 
     /** Navigate to the login page using Playwright's configured baseURL. */

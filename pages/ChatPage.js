@@ -221,6 +221,10 @@ class ChatPage {
         return this.page.getByText('Select all that apply').first();
     }
 
+    get otherSpecifyInput() {
+        return this.page.getByRole('textbox', { name: /Describe your choice/i }).first();
+    }
+
     get thinkingIndicator() {
         return this.page.getByText('Thinking...').first();
     }
@@ -263,15 +267,38 @@ class ChatPage {
 
             const options = this.getOptionButtons();
             const count = await options.count();
-            const selectableCount = count - 1;
+            const entries = [];
+
+            for (let index = 0; index < count; index++) {
+                const option = options.nth(index);
+                const label = ((await option.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+
+                if (!label || /^continue$/i.test(label) || /^skip$/i.test(label)) {
+                    continue;
+                }
+
+                entries.push({ option, label });
+            }
+
+            const preferredEntries = entries.filter(({ label }) => !/^other\b/i.test(label));
+            const selectableEntries = preferredEntries.length > 0 ? preferredEntries : entries;
+
+            if (selectableEntries.length === 0) {
+                throw new Error('No selectable quick-question options were available.');
+            }
 
             if (await this.isMultiSelectQuestion()) {
-                for (let index = 0; index < selectableCount; index++) {
-                    await options.nth(index).click();
+                for (const entry of selectableEntries) {
+                    await entry.option.click();
                 }
             } else {
-                const randomIndex = Math.floor(Math.random() * selectableCount);
-                await options.nth(randomIndex).click();
+                const randomIndex = Math.floor(Math.random() * selectableEntries.length);
+                const selectedEntry = selectableEntries[randomIndex];
+                await selectedEntry.option.click();
+            }
+
+            if (preferredEntries.length === 0 && (await this.isVisible(this.otherSpecifyInput))) {
+                await this.otherSpecifyInput.fill('Current weather only.');
             }
 
             await expect(this.continueButton).toBeEnabled({ timeout: 10000 });

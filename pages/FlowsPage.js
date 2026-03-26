@@ -23,21 +23,23 @@ class FlowsPage {
 
         while (Date.now() < deadline) {
             const overlayVisible = await this.loadingOverlay.isVisible().catch(() => false);
-            const latestFlowHandle = await this.findLatestFlowHandle();
+            const dialogVisible = await this.flowListDialog.isVisible().catch(() => false);
 
-            if (!overlayVisible && latestFlowHandle) {
-                await latestFlowHandle.dispose().catch(() => {});
+            if (dialogVisible && !overlayVisible) {
                 return;
             }
 
-            await latestFlowHandle?.dispose().catch(() => {});
             await this.page.waitForTimeout(500);
         }
 
-        throw new Error('The flow list did not settle into a clickable state in time.');
+        throw new Error('The flow list dialog did not become ready in time.');
     }
 
     async findLatestFlowHandle() {
+        return this.findFlowHandleByRecency(0);
+    }
+
+    async findFlowHandleByRecency(recencyOffset = 0) {
         const dialogVisible = await this.flowListDialog.isVisible().catch(() => false);
         if (!dialogVisible) {
             return null;
@@ -48,12 +50,14 @@ class FlowsPage {
             return null;
         }
 
-        const candidateHandle = await dialogHandle.evaluateHandle((dialog) => {
+        const candidateHandle = await dialogHandle.evaluateHandle((dialog, offset) => {
             const elements = Array.from(dialog.querySelectorAll('*'));
             const metadataNodes = elements.filter((element) => {
                 const text = (element.textContent || '').replace(/\s+/g, ' ').trim();
                 return /edited\s.+/i.test(text);
             });
+            const candidates = [];
+            const seen = new Set();
 
             for (const metadataNode of metadataNodes) {
                 let candidate = metadataNode;
@@ -71,15 +75,20 @@ class FlowsPage {
                         rect.width > 0 &&
                         rect.height > 0
                     ) {
-                        return candidate;
+                        if (!seen.has(candidate)) {
+                            candidates.push(candidate);
+                            seen.add(candidate);
+                        }
+
+                        break;
                     }
 
                     candidate = candidate.parentElement;
                 }
             }
 
-            return null;
-        });
+            return candidates[offset] || null;
+        }, recencyOffset);
 
         const candidate = candidateHandle.asElement();
         if (!candidate) {
@@ -91,17 +100,38 @@ class FlowsPage {
     }
 
     async openLatestFlow() {
+        await this.openFlowByRecency(0);
+    }
+
+    async openFlowByRecency(recencyOffset = 0) {
         await this.flowListDialog.waitFor({ state: 'visible', timeout: 30000 });
         await this.waitForFlowListToSettle();
 
-        const flowHandle = await this.findLatestFlowHandle();
-        if (!flowHandle) {
-            throw new Error('No clickable flow rows were found after opening the Flows listing.');
+        const deadline = Date.now() + 30000;
+        let flowHandle = null;
+        while (Date.now() < deadline) {
+            flowHandle = await this.findFlowHandleByRecency(recencyOffset);
+            if (flowHandle) {
+                break;
+            }
+
+            await this.page.waitForTimeout(500);
         }
 
+        if (!flowHandle) {
+            throw new Error(
+                `No clickable flow rows were found for recency offset ${recencyOffset} after opening the Flows listing.`
+            );
+        }
+
+        const flowLabel = ((await flowHandle.innerText().catch(() => '')) || '')
+            .replace(/\s+/g, ' ')
+            .trim();
         await flowHandle.scrollIntoViewIfNeeded().catch(() => {});
         await flowHandle.click();
         await flowHandle.dispose().catch(() => {});
+
+        return flowLabel;
     }
 }
 
