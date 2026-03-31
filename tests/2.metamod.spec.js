@@ -27,6 +27,7 @@ test.describe.serial('Metamod Agent Creation Flow', () => {
     // TC-02: Skip popup and verify navigation menu
     // ─────────────────────────────────────────────────────────────────────────
     test('TC-02: Skip popup and verify navigation menu', async ({ dashboardPage }) => {
+        await dashboardPage.openHome();
         await dashboardPage.skipPopup();
         await dashboardPage.assertNavigation();
         await dashboardPage.assertChatInputVisible();
@@ -37,13 +38,11 @@ test.describe.serial('Metamod Agent Creation Flow', () => {
     // ─────────────────────────────────────────────────────────────────────────
     test('TC-03: Navigate to Flows and click New Agent', async ({
         dashboardPage,
-        authenticatedPage,
+        chatPage,
     }) => {
         await dashboardPage.navigateToFlows();
         await dashboardPage.clickNewAgentButton();
-        await expect(
-            authenticatedPage.getByRole('textbox', { name: 'Create an agent that can...' })
-        ).toBeVisible({ timeout: 10000 });
+        await chatPage.assertPromptComposerVisible();
     });
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -75,12 +74,8 @@ test.describe.serial('Metamod Agent Creation Flow', () => {
     // ─────────────────────────────────────────────────────────────────────────
     // TC-07: Skip any post-prompt popup
     // ─────────────────────────────────────────────────────────────────────────
-    test('TC-07: Skip any post-prompt popup', async ({ authenticatedPage }) => {
-        const skipBtn = authenticatedPage.getByRole('button', { name: 'Skip' });
-        const isVisible = await skipBtn.isVisible({ timeout: 5000 }).catch(() => false);
-        if (isVisible) {
-            await skipBtn.click();
-        }
+    test('TC-07: Skip any post-prompt popup', async ({ agentCanvasPage }) => {
+        await agentCanvasPage.skipPostPromptPopupIfPresent();
     });
 
     // ─────────────────────────────────────────────────────────────────────────

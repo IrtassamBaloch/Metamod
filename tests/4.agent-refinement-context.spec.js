@@ -1,46 +1,10 @@
 'use strict';
 
 const { test, expect } = require('../fixtures/refinement');
-const { normalizeText, parsePositiveInteger } = require('../utils/refinement');
+const { parsePositiveInteger } = require('../utils/refinement');
 const { writeRefinementSessionArtifacts } = require('../utils/refinementArtifacts');
 
 const DEFAULT_MAX_PLAYGROUND_TURNS = 8;
-
-function normalizeLabels(labels = []) {
-    return labels.map(normalizeText).filter(Boolean).sort();
-}
-
-function hasCanvasChanged(beforePrompt, afterPrompt, beforeLabels, afterLabels) {
-    const promptChanged = normalizeText(beforePrompt) !== normalizeText(afterPrompt);
-    const labelsChanged =
-        JSON.stringify(normalizeLabels(beforeLabels)) !== JSON.stringify(normalizeLabels(afterLabels));
-
-    return {
-        changed: promptChanged || labelsChanged,
-        promptChanged,
-        labelsChanged,
-    };
-}
-
-async function openLatestPlaygroundCapableFlow({
-    dashboardPage,
-    flowsPage,
-    agentRefinementPage,
-}) {
-    await dashboardPage.skipPopup();
-    await dashboardPage.navigateToFlows();
-    const flowLabel = await flowsPage.openLatestFlow();
-    await agentRefinementPage.waitForCanvasReady(60000);
-    await dashboardPage.skipPopup();
-
-    const nodeLabels = await agentRefinementPage.collectVisibleNodeLabels().catch(() => []);
-
-    return {
-        flowLabel,
-        recencyOffset: 0,
-        nodeLabels,
-    };
-}
 
 test.describe('Agent Refinement Context Flow', () => {
     test('TC-01: Run a single context-aware refinement cycle and verify the updated agent', async ({
@@ -91,10 +55,9 @@ test.describe('Agent Refinement Context Flow', () => {
             await expect(authenticatedPage).not.toHaveURL(/.*\/login/);
             await authenticatedLoginPage.assertLoginSuccess(30000);
 
-            const selectedFlow = await openLatestPlaygroundCapableFlow({
+            const selectedFlow = await agentRefinementPage.openLatestPlaygroundCapableFlow({
                 dashboardPage,
                 flowsPage,
-                agentRefinementPage,
             });
             sessionRecord.selectedFlowLabel = selectedFlow.flowLabel;
             sessionRecord.selectedFlowRecencyOffset = selectedFlow.recencyOffset;
@@ -194,7 +157,7 @@ test.describe('Agent Refinement Context Flow', () => {
 
             sessionRecord.refined.systemPrompt = refinedSystemPrompt;
             sessionRecord.refined.nodeLabels = refinedNodeLabels;
-            sessionRecord.refined.canvasChange = hasCanvasChanged(
+            sessionRecord.refined.canvasChange = agentRefinementPage.hasCanvasChanged(
                 initialSystemPrompt,
                 refinedSystemPrompt,
                 initialNodeLabels,

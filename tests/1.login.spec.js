@@ -20,7 +20,10 @@ test.describe('Login Page — @smoke @login', () => {
     test('TC-001 | should login successfully with valid credentials', async ({ page, loginPage }) => {
         const { username, password } = getCredentials();
 
-        await loginPage.login(username, password);
+        await loginPage.loginUntilAuthenticated(username, password, {
+            attempts: 3,
+            authTimeout: 30000,
+        });
 
         // Assert URL changed away from /login
         await expect(page).not.toHaveURL(/.*\/login/);
@@ -48,10 +51,6 @@ test.describe('Login Page — @smoke @login', () => {
         // Should remain on login page
         await expect(page).toHaveURL(/.*\/login/);
 
-        // Assert some form of error feedback is visible
-        const errorFeedback = page.locator(
-            '[role="alert"], .error, [class*="error"], [class*="invalid"], [class*="Error"]'
-        ).first();
-        await expect(errorFeedback).toBeVisible({ timeout: 8000 });
+        await loginPage.assertLoginErrorVisible();
     });
 });

@@ -6,6 +6,7 @@
 'use strict';
 
 const { expect } = require('@playwright/test');
+const { selectPreferredQuickQuestionEntries } = require('../utils/refinement');
 
 class ChatPage {
     /**
@@ -195,6 +196,10 @@ class ChatPage {
         await this.useThisPromptButton.click();
     }
 
+    async assertPromptComposerVisible(timeout = 10000) {
+        await expect(this.chatInput).toBeVisible({ timeout });
+    }
+
     get chatInput() {
         return this.page.getByRole('textbox', { name: 'Create an agent that can...' });
     }
@@ -280,8 +285,7 @@ class ChatPage {
                 entries.push({ option, label });
             }
 
-            const preferredEntries = entries.filter(({ label }) => !/^other\b/i.test(label));
-            const selectableEntries = preferredEntries.length > 0 ? preferredEntries : entries;
+            const selectableEntries = selectPreferredQuickQuestionEntries(entries);
 
             if (selectableEntries.length === 0) {
                 throw new Error('No selectable quick-question options were available.');
@@ -292,12 +296,13 @@ class ChatPage {
                     await entry.option.click();
                 }
             } else {
-                const randomIndex = Math.floor(Math.random() * selectableEntries.length);
-                const selectedEntry = selectableEntries[randomIndex];
-                await selectedEntry.option.click();
+                await selectableEntries[0].option.click();
             }
 
-            if (preferredEntries.length === 0 && (await this.isVisible(this.otherSpecifyInput))) {
+            if (
+                selectableEntries.every(({ label }) => /^other\b/i.test(label)) &&
+                (await this.isVisible(this.otherSpecifyInput))
+            ) {
                 await this.otherSpecifyInput.fill('Current weather only.');
             }
 

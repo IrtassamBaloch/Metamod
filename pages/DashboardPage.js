@@ -44,10 +44,20 @@ class DashboardPage {
         ).toBeVisible({ timeout: 10000 });
     }
 
+    async openHome() {
+        const { pathname } = new URL(this.page.url());
+        if (pathname !== '/') {
+            await this.page.goto('/', { waitUntil: 'domcontentloaded', timeout: 90000 });
+        }
+    }
+
     /**
      * Open the Starter Project "…" context menu and navigate to Flows.
      */
     async navigateToFlows() {
+        await this.openHome();
+        await this.skipPopup();
+
         // Click the "…" (three-dot) button next to "Starter Project"
         await this.page
             .locator('a')

@@ -6,6 +6,7 @@
   "scripts": {
     "test": "npx playwright test",
     "test:headed": "npx playwright test --headed",
+    "test:unit": "node --test unit/refinement-utils.test.js",
     "test:login": "npx playwright test tests/login.spec.js",
     "test:metamod": "npx playwright test tests/metamod.spec.js",
     "test:refinement": "npx playwright test tests/agent-refinement-loop.spec.js",

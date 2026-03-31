@@ -17,6 +17,9 @@ class LoginPage {
         this.usernameInput = page.getByPlaceholder('Username');
         this.passwordInput = page.getByPlaceholder('Password');
         this.signInButton = page.getByRole('button', { name: 'Sign In' });
+        this.errorFeedback = page
+            .locator('[role="alert"], .error, [class*="error"], [class*="invalid"], [class*="Error"]')
+            .first();
 
         // Post-login indicators
         this.dashboardHeading = page.getByText('What would you like to build today?');
@@ -97,6 +100,10 @@ class LoginPage {
     /** Assert the current URL is the login page. */
     async assertOnLoginPage() {
         await this.page.waitForURL('**/login', { timeout: 10000 });
+    }
+
+    async assertLoginErrorVisible(timeout = 8000) {
+        await this.errorFeedback.waitFor({ state: 'visible', timeout });
     }
 
     /**

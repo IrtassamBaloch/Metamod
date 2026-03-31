@@ -85,6 +85,13 @@ class AgentCanvasPage extends BaseCanvasPage {
         }
     }
 
+    async skipPostPromptPopupIfPresent() {
+        const skipButton = this.page.getByRole('button', { name: 'Skip' });
+        if (await this.isVisible(skipButton)) {
+            await this.clickLocatorReliably(skipButton);
+        }
+    }
+
     /** Assert that the current build shell has rendered and is ready for refinement. */
     async assertAgentCreatedOnCanvas() {
         await this.skipTutorial();
